@@ -1,5 +1,11 @@
 #include "systemcalls.h"
 
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -9,13 +15,10 @@
 */
 bool do_system(const char *cmd)
 {
-
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    if (cmd == NULL || system(cmd) != 0)
+    {
+        return false;
+    }
 
     return true;
 }
@@ -49,15 +52,33 @@ bool do_exec(int count, ...)
     // and may be removed
     command[count] = command[count];
 
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+        perror("fork failed");
+        return false;
+    }
+    else if (pid == 0)
+    {
+        execv(command[0], command);
+
+        perror("execv failed");
+        exit(EXIT_FAILURE);
+    }
+    else
+    {
+        int status = 0;
+        if (waitpid(pid, &status, 0) == -1)
+        {
+            perror("waitpid failed");
+            return false;
+        }
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+        {
+            return false;
+        }
+    }
 
     va_end(args);
 
@@ -92,8 +113,65 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    bool status = false;
+    int fd = -1;
+
+    do
+    {
+        if (outputfile == NULL)
+        {
+            break;
+        }
+
+        pid_t pid = fork();
+        if (pid < 0)
+        {
+            perror("fork failed");
+            break;
+        }
+        else if (pid == 0)
+        {
+
+            fd = open(outputfile, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+            if (fd < 0)
+            {
+                perror("open failed");
+                break;
+            }
+
+            if(dup2(fd, STDOUT_FILENO) < 0)
+            {
+                perror("dup2 failed");
+                break;
+            }
+
+            close(fd);
+            fd = -1;
+
+            execv(command[0], command);
+
+            perror("execv failed");
+            break;
+        }
+        else
+        {
+            int status = 0;
+            if (waitpid(pid, &status, 0) == -1)
+            {
+                perror("waitpid failed");
+                break;
+            }
+            status = true;
+        }
+
+    } while (false);
+
+    if(fd >= 0)
+    {
+        close(fd);
+    }
 
     va_end(args);
 
-    return true;
+    return status;
 }
